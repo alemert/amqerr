@@ -1,7 +1,23 @@
 /******************************************************************************/
-/*                  */
+/*                                                                            */
 /*   A M Q E R R   T O   Q U E U E                                            */
-/*                  */
+/*                                                                            */
+/* -------------------------------------------------------------------------- */
+/*                                                                            */
+/*   file: main.c                                                             */
+/*                                                                            */
+/*   description: amqerr2q will read the text from AMQERR??.LOG files and     */
+/*                copy the information to a queue.                            */
+/*                Each entry will be copied in a new message. Messages are    */
+/*                non-persistent. The recovery of missing messages is done    */
+/*                with a message on admin.amqerr.send.queue                   */
+/*                                                                            */
+/*   functions:                                                               */
+/*     - main                                                                 */
+/*                                                                            */
+/*   history:                                                                 */
+/*   19.02.2018 am initial version                                            */
+/*                                                                            */
 /******************************************************************************/
 
 /******************************************************************************/
@@ -79,6 +95,8 @@ int main(int argc, const char* argv[] )
   if( logLevel == LNA ) logLevel = LOG; 
 
   snprintf( logName, PATH_MAX+NAME_MAX, "%s/%s.log", logDir, progname );
+
+  sysRc = amqerr();
 
 _door :
   return sysRc ;
