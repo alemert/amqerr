@@ -96,6 +96,11 @@ int main(int argc, const char* argv[] )
 
   snprintf( logName, PATH_MAX+NAME_MAX, "%s/%s.log", logDir, progname );
 
+  sysRc = initLogging( (const char*) logName, logLevel );
+
+  if( sysRc != 0 ) goto _door ;
+
+
   sysRc = amqerr();
 
 _door :
