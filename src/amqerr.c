@@ -8,13 +8,13 @@
 /*                                                                            */
 /*  functions:                                                                */
 /*    - amqerr                                                                */
-/*    - amqerrsend                              */
-/*    - getDataPath                          */
-/*    - file2queue                      */
+/*    - amqerrsend                                                */
+/*    - getDataPath                                      */
+/*    - dir2queue                                              */
 /*                                                                            */
-/*  history                                                          */
-/*  19.02.2018 am initial version                      */
-/*                                                */
+/*  history                                                                   */
+/*  19.02.2018 am initial version                              */
+/*                                                                  */
 /******************************************************************************/
 #define C_MODULE_AMQERR
 
@@ -31,6 +31,10 @@
 #include <libgen.h>
 #include <dirent.h>
 #include <errno.h>
+#include <time.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <unistd.h>
 
 // ---------------------------------------------------------
 // MQ
@@ -52,6 +56,7 @@
 // local
 // ---------------------------------------------------------
 #include <amqerr.h>
+#include <bits/fcntl.h>
 
 /******************************************************************************/
 /*   G L O B A L S                                                            */
@@ -60,11 +65,29 @@
 /******************************************************************************/
 /*   D E F I N E S                                                            */
 /******************************************************************************/
-#define ITEM_LENGTH  PATH_MAX 
+#define ITEM_LENGTH   PATH_MAX 
+#define AMQERR        "AMQERR"
+#define AMQ_FILE_NAME AMQERR"??.LOG"
+#define AMQ_MAX_ID    99
 
 /******************************************************************************/
 /*   M A C R O S                                                              */
 /******************************************************************************/
+
+/******************************************************************************/
+/*   S T R U C T                                                              */
+/******************************************************************************/
+struct sAmqerr
+{
+  char name[PATH_MAX+1]; // length of AMQ_FILE_NAME + 1
+  time_t mtime ;         // modification time of the amqerr file
+  off_t length;          // lenght of the amqerr file
+};
+
+/******************************************************************************/
+/*   T Y P E S                                                                */
+/******************************************************************************/
+typedef struct sAmqerr tAmgerr ;
 
 /******************************************************************************/
 /*   P R O T O T Y P E S                                                      */
@@ -194,6 +217,78 @@ MQLONG amqerrsend( MQHCONN *_hConn )
   dir2queue( _hConn, path );
 
   _door:
+
+  logFuncExit( );
+
+  return sysRc;
+}
+
+/******************************************************************************/
+/*  COPY FILE                                                                 */
+/*                                                                            */
+/*  description:                                                              */
+/*    copy file source to file destination                                    */
+/*                                                                            */
+/*    attributes:                                                             */
+/*                                                                            */
+/*  return code:                                                              */
+/*    0  -> OK                                                                */
+/*    >0 -> ERR                                                               */
+/*                                                                            */
+/******************************************************************************/
+int copy( const char* _src, const char _dst )
+{
+  logFuncCall( );
+
+  int sysRc = 0 ;
+
+  int *srcFD ;
+  int *dstFD ;
+
+  ssize_t size ;
+
+  #define CHUNK_SIZE 4096
+  char chunk[CHUNK_SIZE];
+
+  // -------------------------------------------------------
+  // open both files
+  // -------------------------------------------------------
+  if( !(srcFD=open(_src,O_RDONLY)) )
+  {
+    sysRc = errno ;
+    logger( LSTD_OPEN_FILE_FAILED, _src );
+    logger( LSTD_ERRNO_ERR, sysRc, strerror( sysRc ) );
+    goto _door ;
+  }
+
+  if( !(dstFD=open(_dst,O_CREATE|O_TRUNC|O_WRONLY)) )
+  {
+    sysRc = errno ;
+    logger( LSTD_OPEN_FILE_FAILED, _src );
+    logger( LSTD_ERRNO_ERR, sysRc, strerror( sysRc ) );
+    goto _door ;
+  }
+  
+  // -------------------------------------------------------
+  // copy data
+  // -------------------------------------------------------
+  while( 1 )
+  {
+    size = read( srcFD, chunk, CHUNK_SIZE );
+    if( size == 0 ) break;
+    if( (write( dstFD, chunk, size )) != size );
+    {
+      sysRc = errno ;
+      logger( LSTD_FILE_COPY_ERR, _src, _dst );
+      logger( LSTD_ERRNO_ERR, sysRc, strerror( sysRc ) );
+    }
+    if( size < CHUNK_SIZE ) break;
+  }
+
+  _door:
+
+  if( srcFD ) close(srcFD) ;
+  if( dstFD ) close(dstFD) ;
 
   logFuncExit( );
 
@@ -600,9 +695,48 @@ MQLONG dir2queue( MQHCONN  *_hConn, char* _path )
 
   MQLONG sysRc = MQRC_NONE;
 
-  struct dirent *pDirent ;
-  DIR *pDir ;
+  struct dirent *pDirent ;  // data path directory
+  DIR *pDir ;               // data path directory
+  FILE *file;               // general file descriptor
+            //
+  struct stat fileAttr ;    // file attributes for AMQERR??.LOG file
+  unsigned short id = 0;        // the ?? part of AMQERR??.LOG file name
+  char amqerr[PATH_MAX+1];  // absolute file name of AMQERR??.LOG file
+                                  //
+  tAmgerr allFile[AMQ_MAX_ID+1];  // all  AMQERR??.LOG files [ 01 - 99]
+  tAmgerr baseFile[4];            // base AMQERR??.LOG files [ 01 - 03]
+                                  // allFile[0] is not in use
 
+  int i;
+
+  // -------------------------------------------------------
+  // initialize file list (assuming no file exists)
+  // -------------------------------------------------------
+  for( i=0; i<AMQ_MAX_ID; i++ )
+  {
+    allFile[id].mtime = 0;
+    allFile[id].mtime = 0;
+  }
+
+  // -------------------------------------------------------
+  // check if compare file exists, if not create it
+  // -------------------------------------------------------
+  sprintf(baseFile[id].name,"%s/CPMERR03.LOG",_path);
+  baseFile[id].mtime = fileAttr.st_mtime ;
+  baseFile[id].mtime = fileAttr.st_size  ;
+
+  if( (file=fopen(baseFile[0],"r") ) )
+  {
+    fclose(file);
+  }
+  else
+  {
+    copy( baseFile[3].name, baseFile[0].name );
+  }
+
+  // -------------------------------------------------------
+  // open data path directory for list
+  // -------------------------------------------------------
   pDir = opendir( _path );
   if( !pDir )
   {
@@ -612,14 +746,62 @@ MQLONG dir2queue( MQHCONN  *_hConn, char* _path )
     goto _door ;
   }
 
-  while( (pDirent = readdir( pDir) ) != NULL )
-  {
-    printf( "%s\n", pDirent->d_name );
+  // -------------------------------------------------------
+  // list all files
+  // -------------------------------------------------------
+  while( (pDirent=readdir(pDir)) )  // go through all files
+  {                                 //
+    if( memcmp( pDirent->d_name,    // find out if it is a AMQERR file
+                AMQERR         ,    //
+                strlen(AMQERR) ) )  //
+    {                               // ignore all files but AMQERR
+      continue;                     //
+    }                               //
+   
+    // -----------------------------------------------------
+    // get the id of the AMQERR file - ?? in AMQERR??.LOG
+    //   convert the digit from letter to digit by subtract 
+    //   ASCII(letter) by ASCII('0')
+    // -----------------------------------------------------
+    id = ((int)pDirent->d_name[6]-48)*10 + // 1st digit - ASCII(0) * 10
+         ((int)pDirent->d_name[7]-48) ;    // 2nd digit - ASCII(0) 
+
+    // -----------------------------------------------------
+    // get the file information e.g length and modification time 
+    // -----------------------------------------------------
+    snprintf(amqerr, PATH_MAX, "%s/%s", _path,pDirent->d_name );
+    stat( amqerr, &fileAttr );
+
+    #if(1)
+      printf( "%s ", amqerr );
+      printf( "%d ", (int)id );
+      printf( "size: %d ", (int)fileAttr.st_size );
+      printf( "mtime: %d\n", (int)fileAttr.st_mtime );
+    #endif
+
+    // -----------------------------------------------------
+    // fill file lists
+    // -----------------------------------------------------
+    memcpy(allFile[id].name,amqerr,strlen(amqerr));
+    allFile[id].mtime = fileAttr.st_mtime ;
+    allFile[id].mtime = fileAttr.st_size  ;
+
+    if( id < 4 )    // base file list 
+    {               //
+      memcpy(baseFile[id].name,amqerr,strlen(amqerr));
+      baseFile[id].mtime = fileAttr.st_mtime ;
+      baseFile[id].mtime = fileAttr.st_size  ;
+    }
+
+    
   }
 
   _door:
 
-  closedir( pDir ) ;
+  if( pDir )
+  {
+    closedir( pDir ) ;
+  }
 
   logFuncExit( );
   return sysRc;
