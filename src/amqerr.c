@@ -8,13 +8,15 @@
 /*                                                                            */
 /*  functions:                                                                */
 /*    - amqerr                                                                */
-/*    - amqerrsend                                                */
-/*    - getDataPath                                      */
-/*    - dir2queue                                              */
+/*    - amqerrsend                                                            */
+/*    - getDataPath                                                          */
+/*    - lsAmqerr                                */
+/*    - rotateAmqerr                        */
+/*    - dir2queue                                                      */
 /*                                                                            */
 /*  history                                                                   */
 /*  19.02.2018 am initial version                              */
-/*                                                                  */
+/*                                                                            */
 /******************************************************************************/
 #define C_MODULE_AMQERR
 
@@ -34,6 +36,7 @@
 #include <time.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <fcntl.h>
 #include <unistd.h>
 
 // ---------------------------------------------------------
@@ -56,7 +59,6 @@
 // local
 // ---------------------------------------------------------
 #include <amqerr.h>
-#include <bits/fcntl.h>
 
 /******************************************************************************/
 /*   G L O B A L S                                                            */
@@ -69,6 +71,7 @@
 #define AMQERR        "AMQERR"
 #define AMQ_FILE_NAME AMQERR"??.LOG"
 #define AMQ_MAX_ID    99
+#define CMPERR        "CMPERR03.LOG"
 
 /******************************************************************************/
 /*   M A C R O S                                                              */
@@ -87,13 +90,15 @@ struct sAmqerr
 /******************************************************************************/
 /*   T Y P E S                                                                */
 /******************************************************************************/
-typedef struct sAmqerr tAmgerr ;
+typedef struct sAmqerr tAmqerr ;
 
 /******************************************************************************/
 /*   P R O T O T Y P E S                                                      */
 /******************************************************************************/
 MQLONG amqerrsend( MQHCONN *_hConn );
 MQLONG getDataPath( MQHCONN *_hConn, char* _path );
+int    lsAmqerr( const char* _path, tAmqerr* _arr, int _lng);
+int    rotateAmqerr( tAmqerr *_arr );
 MQLONG dir2queue( MQHCONN  *_hConn, char* _path );
 
 /******************************************************************************/
@@ -199,7 +204,7 @@ int amqerr()
 /******************************************************************************/
 MQLONG amqerrsend( MQHCONN *_hConn )
 {
-  logFuncCall( );
+ logFuncCall( );
   MQLONG sysRc = MQRC_NONE ;
 
   char path[PATH_MAX+1];
@@ -236,24 +241,26 @@ MQLONG amqerrsend( MQHCONN *_hConn )
 /*    >0 -> ERR                                                               */
 /*                                                                            */
 /******************************************************************************/
-int copy( const char* _src, const char _dst )
+int copy( const char* _src, const char* _dst )
 {
   logFuncCall( );
 
   int sysRc = 0 ;
 
-  int *srcFD ;
-  int *dstFD ;
+  int srcFD ;
+  int dstFD ;
 
   ssize_t size ;
 
   #define CHUNK_SIZE 4096
   char chunk[CHUNK_SIZE];
 
+  errno = 0;
   // -------------------------------------------------------
   // open both files
   // -------------------------------------------------------
-  if( !(srcFD=open(_src,O_RDONLY)) )
+  srcFD=open(_src,O_RDONLY) ;
+  if( errno )
   {
     sysRc = errno ;
     logger( LSTD_OPEN_FILE_FAILED, _src );
@@ -261,7 +268,9 @@ int copy( const char* _src, const char _dst )
     goto _door ;
   }
 
-  if( !(dstFD=open(_dst,O_CREATE|O_TRUNC|O_WRONLY)) )
+  if( !(dstFD=open( _dst,
+                    O_CREAT|O_TRUNC|O_WRONLY,
+		    S_IRUSR|S_IWUSR|S_IRGRP|S_IWGRP)) )
   {
     sysRc = errno ;
     logger( LSTD_OPEN_FILE_FAILED, _src );
@@ -275,8 +284,15 @@ int copy( const char* _src, const char _dst )
   while( 1 )
   {
     size = read( srcFD, chunk, CHUNK_SIZE );
+    if( errno )
+    {
+      sysRc = errno ;
+      logger( LSTD_ERR_READING_FILE, _src );
+      logger( LSTD_ERRNO_ERR, sysRc, strerror( sysRc ) );
+      goto _door ;
+    }
     if( size == 0 ) break;
-    if( (write( dstFD, chunk, size )) != size );
+    if( (write( dstFD, chunk, size )) != size )
     {
       sysRc = errno ;
       logger( LSTD_FILE_COPY_ERR, _src, _dst );
@@ -676,63 +692,34 @@ _door:
 }
 
 /******************************************************************************/
-/*  directory to queue      */
+/*  list AMQERR files                                                         */
 /*                                                                            */
-/*  description: list all amqerr files and copy every file to queues          */
+/*  description:                                                              */
+/*    list all AMQERR??.LOG files, get name, modification time and length     */
 /*                                                                            */
 /*  attributes:                                                               */
-/*     - MQ connection handle                                                 */
-/*     - path to error files                                                  */
+/*    - path to queue manager AMQERR??.LOG files                              */
+/*    - array for list                                                        */
+/*    - the length of the array                                               */
 /*                                                                            */
 /*  return code:                                                              */
-/*    (int)    0  -> OK                                                       */
-/*    (int) != 0 -> MQ Reason Code                                            */
+/*    0  -> OK                                                                */
+/*    >0 -> errno                                                             */
+/*    <0 -> size of the array error                                           */
 /*                                                                            */
 /******************************************************************************/
-MQLONG dir2queue( MQHCONN  *_hConn, char* _path )
+int lsAmqerr( const char* _path, tAmqerr* _arr, int _lng )
 {
   logFuncCall( );
+  int sysRc ;
 
-  MQLONG sysRc = MQRC_NONE;
+  struct dirent *pDirent ;        // data path directory
+  DIR *pDir ;                     // data path directory
 
-  struct dirent *pDirent ;  // data path directory
-  DIR *pDir ;               // data path directory
-  FILE *file;               // general file descriptor
-            //
-  struct stat fileAttr ;    // file attributes for AMQERR??.LOG file
-  unsigned short id = 0;        // the ?? part of AMQERR??.LOG file name
-  char amqerr[PATH_MAX+1];  // absolute file name of AMQERR??.LOG file
-                                  //
-  tAmgerr allFile[AMQ_MAX_ID+1];  // all  AMQERR??.LOG files [ 01 - 99]
-  tAmgerr baseFile[4];            // base AMQERR??.LOG files [ 01 - 03]
-                                  // allFile[0] is not in use
+  struct stat fileAttr ;          // file attributes for AMQERR??.LOG file
+  unsigned short id = 0;          // the ?? part of AMQERR??.LOG file name
 
-  int i;
-
-  // -------------------------------------------------------
-  // initialize file list (assuming no file exists)
-  // -------------------------------------------------------
-  for( i=0; i<AMQ_MAX_ID; i++ )
-  {
-    allFile[id].mtime = 0;
-    allFile[id].mtime = 0;
-  }
-
-  // -------------------------------------------------------
-  // check if compare file exists, if not create it
-  // -------------------------------------------------------
-  sprintf(baseFile[id].name,"%s/CPMERR03.LOG",_path);
-  baseFile[id].mtime = fileAttr.st_mtime ;
-  baseFile[id].mtime = fileAttr.st_size  ;
-
-  if( (file=fopen(baseFile[0],"r") ) )
-  {
-    fclose(file);
-  }
-  else
-  {
-    copy( baseFile[3].name, baseFile[0].name );
-  }
+  char amqerr[PATH_MAX+1];        // absolute file name of AMQERR??.LOG file
 
   // -------------------------------------------------------
   // open data path directory for list
@@ -751,57 +738,179 @@ MQLONG dir2queue( MQHCONN  *_hConn, char* _path )
   // -------------------------------------------------------
   while( (pDirent=readdir(pDir)) )  // go through all files
   {                                 //
-    if( memcmp( pDirent->d_name,    // find out if it is a AMQERR file
-                AMQERR         ,    //
-                strlen(AMQERR) ) )  //
+    if( memcmp( pDirent->d_name, AMQERR, strlen(AMQERR) ) != 0  &&
+        memcmp( pDirent->d_name, CMPERR, strlen(CMPERR) ) != 0  )
     {                               // ignore all files but AMQERR
       continue;                     //
     }                               //
-   
+
     // -----------------------------------------------------
     // get the id of the AMQERR file - ?? in AMQERR??.LOG
     //   convert the digit from letter to digit by subtract 
     //   ASCII(letter) by ASCII('0')
     // -----------------------------------------------------
-    id = ((int)pDirent->d_name[6]-48)*10 + // 1st digit - ASCII(0) * 10
-         ((int)pDirent->d_name[7]-48) ;    // 2nd digit - ASCII(0) 
+    if( memcmp( pDirent->d_name, CMPERR, strlen(CMPERR) ) == 0 )
+    {
+      id = 0 ;
+    }
+    else
+    {
+      id = ((int)pDirent->d_name[6]-48)*10 + // 1st digit - ASCII(0) * 10
+           ((int)pDirent->d_name[7]-48) ;    // 2nd digit - ASCII(0) 
+    }
+
+    if( id > _lng ) continue ;  // file id is to high for the array
 
     // -----------------------------------------------------
     // get the file information e.g length and modification time 
     // -----------------------------------------------------
-    snprintf(amqerr, PATH_MAX, "%s/%s", _path,pDirent->d_name );
-    stat( amqerr, &fileAttr );
+   snprintf(amqerr, PATH_MAX, "%s/%s", (char*) _path, pDirent->d_name );
+   stat( amqerr, &fileAttr );
 
-    #if(1)
-      printf( "%s ", amqerr );
-      printf( "%d ", (int)id );
-      printf( "size: %d ", (int)fileAttr.st_size );
-      printf( "mtime: %d\n", (int)fileAttr.st_mtime );
-    #endif
+   #if(1)
+     printf( "%s ", amqerr );
+     printf( "%d ", (int)id );
+     printf( "size: %d ", (int)fileAttr.st_size );
+     printf( "mtime: %d\n", (int)fileAttr.st_mtime );
+   #endif
 
-    // -----------------------------------------------------
-    // fill file lists
-    // -----------------------------------------------------
-    memcpy(allFile[id].name,amqerr,strlen(amqerr));
-    allFile[id].mtime = fileAttr.st_mtime ;
-    allFile[id].mtime = fileAttr.st_size  ;
-
-    if( id < 4 )    // base file list 
-    {               //
-      memcpy(baseFile[id].name,amqerr,strlen(amqerr));
-      baseFile[id].mtime = fileAttr.st_mtime ;
-      baseFile[id].mtime = fileAttr.st_size  ;
-    }
-
-    
+   // ---------------------------------------------------
+   // fill file lists
+   // ---------------------------------------------------
+    memcpy( _arr[id].name,amqerr,strlen(amqerr));
+    _arr[id].mtime = fileAttr.st_mtime ;
+    _arr[id].length = fileAttr.st_size  ;
   }
 
   _door:
 
-  if( pDir )
+  if( pDir ) closedir(pDir);
+
+  logFuncExit( );
+  return sysRc;
+}
+
+/******************************************************************************/
+/*  rotate AMQERR files                                                       */
+/*                                                                            */
+/*  description:                                                              */
+/*    move AMQERR files >3 to higher name                                     */
+/*    file AMQERR98.LOG to AMQERR99.LOG                                       */
+/*    file AMQERR{n}.LOG to AMQERR{n+1}.LOG                                   */
+/*    file AMQERR04.LOG to AMQERR05.LOG                                       */
+/*    file CMPERR03.LOG to AMQERR04.LOG                                       */
+/*                                                                            */
+/*  attributes:                                                               */
+/*    - list of files with time and length                                    */
+/*                                                                            */
+/*  return code:                                                              */
+/*    0 -> OK                                                                 */
+/*    1 -> ERR                                                                */
+/*                                                                            */
+/******************************************************************************/
+int rotateAmqerr( tAmqerr *_arr )
+{
+  logFuncCall( );
+  int sysRc = 0 ;
+
+  int i;
+
+  FILE* file;
+
+  if( (file=fopen(_arr[0].name,"r") ) )
   {
-    closedir( pDir ) ;
+    fclose(file);
   }
+  else
+  {
+    copy( _arr[3].name, _arr[0].name );
+  }
+
+  for( i=AMQ_MAX_ID; i>3; i-- )
+  {
+    if( _arr[i].mtime > 0 ) break;
+  }
+
+  if( i== 3 ) goto _door;
+
+  for( ; i>4; i-- )
+  {
+    unlink( _arr[i].name );
+    link( _arr[i-1].name, _arr[i].name);
+  }
+
+    unlink( _arr[4].name );
+    link( _arr[0].name, _arr[4].name);
+    unlink( _arr[4].name );
+
+  _door:
+
+  logFuncExit( );
+  return sysRc;
+}
+
+/******************************************************************************/
+/*  directory to queue                                                        */
+/*                                                                            */
+/*  description:                                                              */
+/*   - list all AMQERR files                                                  */ 
+/*   - rotate AMQERR04 to AMQERR98 files if AMQERR02 was moved to AMQERR03    */
+/*   - copy new error items to a queue from AMQERR02 if AMQERR01 was moved    */
+/*      to AMQERR02                                                           */
+/*   - copy new error items to a queue from AMQERR01 if its time stamp has    */
+/*      been modified                                                         */
+/*                                                                            */
+/*  attributes:                                                               */
+/*     - MQ connection handle                                                 */
+/*     - path to error files                                                  */
+/*                                                                            */
+/*  return code:                                                              */
+/*    (int)    0  -> OK                                                       */
+/*    (int) != 0 -> MQ Reason Code                                            */
+/*                                                                            */
+/******************************************************************************/
+MQLONG dir2queue( MQHCONN  *_hConn, char* _path )
+{
+  logFuncCall( );
+
+  MQLONG sysRc = MQRC_NONE;
+
+  tAmqerr allFile[AMQ_MAX_ID+1];  // all  AMQERR??.LOG files [ 01 - 99]
+  tAmqerr baseFile[4];            // base AMQERR??.LOG files [ 01 - 03]
+                                  // allFile[0] is not in use
+
+  int i;
+
+  // -------------------------------------------------------
+  // initialize file list (assuming no file exists)
+  // -------------------------------------------------------
+  for( i=0; i<AMQ_MAX_ID; i++ )
+  {
+    allFile[i].mtime = 0;
+    allFile[i].length = 0;
+  }
+
+  for( i=1; i<4; i++ )
+  {
+    baseFile[i].mtime = 0;
+    baseFile[i].length = 0;
+  }
+
+  // -------------------------------------------------------
+  // check if compare file exists, if not create it
+  // -------------------------------------------------------
+  sprintf( allFile[0].name, "%s/"CMPERR,_path);
+
+  while( 1 )
+  {
+    sysRc = lsAmqerr( _path, allFile, AMQ_MAX_ID );
+    if( allFile[0].mtime < allFile[3].mtime ) rotateAmqerr( allFile );
+    
+    sleep(5);
+  }
+
+  _door:
+
 
   logFuncExit( );
   return sysRc;
