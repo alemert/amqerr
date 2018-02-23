@@ -73,6 +73,8 @@
 #define AMQ_MAX_ID    99
 #define CMPERR        "CMPERR03.LOG"
 
+#define LOOP          5    // time to sleep in each main loop
+
 /******************************************************************************/
 /*   M A C R O S                                                              */
 /******************************************************************************/
@@ -192,8 +194,11 @@ int amqerr()
 /******************************************************************************/
 /*  AMQ ERRROR SEND                                                           */
 /*                                                                            */
-/*  description: read amqerr log tag and put it to the queue                  */
-/*                                                                            */
+/*  description:                                                              */
+/*    open both queues (store and state)            */
+/*    rotate AMQERR files                       */
+/*    transfer AMQERR files information to queues          */
+/*                    */
 /*  attributes: void                                                          */
 /*                                                                            */
 /*  return code:                                                              */
@@ -217,11 +222,15 @@ MQLONG amqerrsend( MQHCONN *_hConn )
   {
     goto _door;
   }
-
   strcat( path, "/errors" );
+
+  // -------------------------------------------------------
+  // rotate files, transfer data from AMQERR files to store queue
+  // -------------------------------------------------------
   dir2queue( _hConn, path );
 
   _door:
+
 
   logFuncExit( );
 
@@ -815,33 +824,23 @@ int rotateAmqerr( tAmqerr *_arr )
 
   int i;
 
-  FILE* file;
-
-  if( (file=fopen(_arr[0].name,"r") ) )
-  {
-    fclose(file);
-  }
-  else
-  {
-    copy( _arr[3].name, _arr[0].name );
-  }
-
   for( i=AMQ_MAX_ID; i>3; i-- )
   {
     if( _arr[i].mtime > 0 ) break;
   }
 
+  i++;
   if( i== 3 ) goto _door;
 
   for( ; i>4; i-- )
   {
-    unlink( _arr[i].name );
     link( _arr[i-1].name, _arr[i].name);
   }
 
-    unlink( _arr[4].name );
-    link( _arr[0].name, _arr[4].name);
-    unlink( _arr[4].name );
+  if( _arr[4].mtime > 0 ) unlink( _arr[4].name );
+
+  link( _arr[0].name, _arr[4].name);
+  unlink( _arr[0].name );
 
   _door:
 
@@ -878,14 +877,56 @@ MQLONG dir2queue( MQHCONN  *_hConn, char* _path )
   tAmqerr allFile[AMQ_MAX_ID+1];  // all  AMQERR??.LOG files [ 01 - 99]
   tAmqerr baseFile[4];            // base AMQERR??.LOG files [ 01 - 03]
                                   // allFile[0] is not in use
+  MQOD dStoreQ = {MQOD_DEFAULT}; // queue descriptor
+  MQOD dStateQ = {MQOD_DEFAULT}; // queue descriptor
+
+  MQHOBJ hStoreQ;               // queue handle   
+  MQHOBJ hStateQ;               // queue handle   
+
+
+  struct stat aFileAttr ;          // file attributes for AMQERR file
+  struct stat cFileAttr ;          // file attributes for CMPERR file
 
   int i;
 
   // -------------------------------------------------------
+  // open queues
+  // -------------------------------------------------------
+  memcpy( dStoreQ.ObjectName, AMQ_STORE_Q, MQ_Q_NAME_LENGTH );
+
+  sysRc=mqOpenObject( *_hConn               , // connection handle
+                      &dStoreQ              , // queue descriptor
+                      MQOO_OUTPUT           | // put message
+                      MQOO_INPUT_AS_Q_DEF   | 
+                      MQOO_FAIL_IF_QUIESCING, // fail if queue manager stopping
+                      &hStoreQ              ); // queue handle
+
+  switch( sysRc )
+  {
+    case MQRC_NONE: break;
+    default: goto _door;
+  }
+
+  memcpy( dStoreQ.ObjectName, AMQ_STORE_Q, MQ_Q_NAME_LENGTH );
+
+  sysRc=mqOpenObject( *_hConn               , // connection handle
+                      &dStateQ              , // queue descriptor
+                      MQOO_OUTPUT           | // put message
+                      MQOO_FAIL_IF_QUIESCING, // fail if queue manager stopping
+                      &hStateQ              ); // queue handle
+
+  switch( sysRc )
+  {
+    case MQRC_NONE: break;
+    default: goto _door;
+  }
+
+  // -------------------------------------------------------
   // initialize file list (assuming no file exists)
   // -------------------------------------------------------
-  for( i=0; i<AMQ_MAX_ID; i++ )
+  for( i=1; i<AMQ_MAX_ID+1; i++ )
   {
+    sprintf( allFile[i].name, "%s/"AMQERR"%02d.LOG",_path,i);
     allFile[i].mtime = 0;
     allFile[i].length = 0;
   }
@@ -895,6 +936,8 @@ MQLONG dir2queue( MQHCONN  *_hConn, char* _path )
     baseFile[i].mtime = 0;
     baseFile[i].length = 0;
   }
+  
+  sysRc = lsAmqerr( _path, baseFile, AMQ_MAX_ID );
 
   // -------------------------------------------------------
   // check if compare file exists, if not create it
@@ -904,13 +947,37 @@ MQLONG dir2queue( MQHCONN  *_hConn, char* _path )
   while( 1 )
   {
     sysRc = lsAmqerr( _path, allFile, AMQ_MAX_ID );
-    if( allFile[0].mtime < allFile[3].mtime ) rotateAmqerr( allFile );
-    
-    sleep(5);
+
+    // -----------------------------------------------------
+    // rotate AMQERR files
+    // -----------------------------------------------------
+    stat( allFile[3].name, &aFileAttr ); // get change time of AMQERR03.LOG
+    stat( allFile[0].name, &cFileAttr ); // get change time of CMPERR03.LOG
+    if( errno == ENOENT )                //
+    {                                    // CMPERR03.LOG doesn't exist
+      copy( allFile[3].name ,            // create it by copying  AMQERR03
+            allFile[0].name );           // to CMPERR03
+    }                                    //
+    else if( aFileAttr.st_ctim.tv_sec >  // CMPERR03 exists and
+             cFileAttr.st_ctim.tv_sec )  // AMQERR03 is newer than CMPERR03 
+    {                                    //
+      rotateAmqerr( allFile );           // rotate log files
+    }                                    //
+
+    // -----------------------------------------------------
+    // get the base file information from the 
+    // -----------------------------------------------------
+    if( baseFile[1].mtime == 0 )
+    {
+    }
+
+    sleep(LOOP);
   }
 
   _door:
 
+  mqCloseObject( *_hConn, &hStoreQ );
+  mqCloseObject( *_hConn, &hStateQ );
 
   logFuncExit( );
   return sysRc;

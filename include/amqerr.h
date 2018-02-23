@@ -24,6 +24,9 @@ const char progname[] = "amqerr" ;
 extern const char progname[] ;
 #endif
 
+#define AMQ_STATE_Q "ADMIN.AMQERR.STATE.QUEUE"
+#define AMQ_STORE_Q "ADMIN.AMQERR.STORE.QUEUE"
+
 /******************************************************************************/
 /*   T Y P E S                                                                */
 /******************************************************************************/
