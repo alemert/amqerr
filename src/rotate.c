@@ -195,6 +195,7 @@ int rotateAmqerr( tAmqerr *_arr )
 
   for( ; i>4; i-- )
   {
+    unlink( _arr[i].name );
     link( _arr[i-1].name, _arr[i].name);
   }
 

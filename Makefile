@@ -18,7 +18,7 @@ DBGOPT = -g
 # ------------------------------------------------------------------------------
 # sources
 # ------------------------------------------------------------------------------
-SOURCES = amqerr.c rotate.c
+SOURCES = amqerr.c rotate.c mqcall.c
 
 LSOWN = msgcat mqutil
 
