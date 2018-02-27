@@ -35,6 +35,7 @@ extern const char progname[] ;
 #define AMQERR        "AMQERR"
 #define AMQ_FILE_NAME AMQERR"??.LOG"
 #define AMQ_MAX_ID    99
+#define AMQ_MAX_BASE_ID 3
 #define CMPERR        "CMPERR03.LOG"
 
 #define AMQERR_LOG_STRUC_ID       "AALI"   // admin amqerr log information
@@ -66,6 +67,7 @@ struct sAmqerr
   char name[PATH_MAX+1]; // length of AMQ_FILE_NAME + 1
   time_t mtime ;         // modification time of the AMQERR file
   off_t length;          // length of the AMQERR file
+  MQBYTE24 msgId;        // message id containing information on STORE queue
 };
 
 struct sAmqerrState

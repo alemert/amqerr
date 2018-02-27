@@ -216,8 +216,6 @@ MQLONG dir2queue( char* _path )
 
   tAmqerr allFile[AMQ_MAX_ID+1];  // all  AMQERR??.LOG files [ 01 - 99]
   tAmqerr baseFile[4];            // base AMQERR??.LOG files [ 01 - 03]
-                                  // allFile[0] is not in use
-
 
   struct stat aFileAttr ;          // file attributes for AMQERR file
   struct stat cFileAttr ;          // file attributes for CMPERR file
@@ -233,12 +231,14 @@ MQLONG dir2queue( char* _path )
     sprintf( allFile[i].name, "%s/"AMQERR"%02d.LOG",_path,i);
     allFile[i].mtime = 0;
     allFile[i].length = 0;
+    memcpy( allFile[i].msgId, MQMI_NONE, sizeof(MQBYTE24) );
   }
 
-  for( i=1; i<4; i++ )
+  for( i=1; i<AMQ_MAX_BASE_ID+1; i++ )
   {
     baseFile[i].mtime = 0;
     baseFile[i].length = 0;
+    memcpy(baseFile[i].msgId, MQMI_NONE, sizeof(MQBYTE24) );
   }
   
   sysRc = lsAmqerr( _path, baseFile, AMQ_MAX_ID );

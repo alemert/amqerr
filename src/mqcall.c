@@ -193,57 +193,72 @@ MQLONG houseKeepingMQ()
 /*      will be set to MQRC_NONE                                              */
 /*                                                                            */
 /******************************************************************************/
-MQLONG getSendState( tAmqerr* file )
+MQLONG getSendState( tAmqerr* _file )
 {
   logFuncCall( );
 
   MQLONG sysRc ;
 
-  MQMD  dMsg = { MQMD_DEFAULT };
-  MQGMO getMsgOpt = { MQGMO_DEFAULT };
+  MQMD  md = { MQMD_DEFAULT };
+  MQGMO gmo = { MQGMO_DEFAULT };
+  gmo.Version = MQGMO_VERSION_2 ;
 
   tAmqerrState msg;
   MQLONG msgLng = sizeof(tAmqerrState);
 
-  unsigned short minId ;
   unsigned short id ;
   
-  getMsgOpt.Options      |= MQGMO_BROWSE_FIRST;
-  getMsgOpt.MatchOptions  = MQGMO_NONE;
+  gmo.Options      |= MQGMO_BROWSE_FIRST;
+  gmo.MatchOptions  = MQMO_NONE;
 
-  for( minId=1; minId<4; minId++ )
+  for( id=1; sysRc != MQRC_NO_MSG_AVAILABLE; id++ )
   {
-    for( id=minId; id<4; id++ )
-    {
-      sysRc = mqGet( ghCon               ,   //
-                     ghStateQ            ,   //
-                     &msg                ,   //
-                     &msgLng             ,   //
-                     &dMsg               ,   //
-                     getMsgOpt           ,   //
-                     MQGMO_NO_WAIT      );   //
+//  gmo.MatchOptions = MQMO_NONE;
+    sysRc = mqGet( ghCon               ,   //
+                   ghStateQ            ,   //
+                   &msg                ,   //
+                   &msgLng             ,   //
+                   &md               ,   //
+                   gmo           ,   //
+                   MQGMO_NO_WAIT      );   //
 
-      switch( sysRc )
+    if( (gmo.Options & MQGMO_BROWSE_FIRST) == MQGMO_BROWSE_FIRST) 
+    {
+      gmo.Options -= MQGMO_BROWSE_FIRST;
+      gmo.Options |= MQGMO_BROWSE_NEXT ;
+    }
+
+    if( id == AMQ_MAX_BASE_ID )   // error; zwei gmo notwendig browse & get
+    {                             // siehe cleanq
+      gmo.Options -= MQGMO_BROWSE_NEXT ;
+      gmo.Options |= MQGMO_MSG_UNDER_CURSOR ; 
+    }
+
+    switch( sysRc )
+    {
+      case MQRC_NONE: 
       {
-        case MQRC_NONE: 
-        {
-          if( msg.fileId == minId )
-	  {}
-	  else
-	  {
-            sysRc = putInitStateMsg(id);
-            if( sysRc != MQRC_NONE ) goto _door;
-          }
-	  break;
-        }
-        case MQRC_NO_MSG_AVAILABLE:
-        {
-          sysRc = putInitStateMsg(id);
-          if( sysRc != MQRC_NONE ) goto _door;
-          break;
-        }
-        default: goto _door;
+	_file[msg.fileId].length = msg.length;
+	_file[msg.fileId].mtime  = msg.time  ;
+        memcpy(_file[msg.fileId].name,msg.file,sizeof(msg.file));
+	memcpy(_file[msg.fileId].msgId, md.MsgId, sizeof(MQBYTE24) );
+        break;
       }
+      case MQRC_NO_MSG_AVAILABLE:
+      {
+        break;
+      }
+      default: goto _door;
+    }
+  }
+
+  for( id=1; id<AMQ_MAX_BASE_ID+1; id++ )
+  {
+    
+    if( memcmp( _file[id].msgId, MQMI_NONE, sizeof(MQBYTE24) ) == 0)
+    {
+      sysRc = putInitStateMsg(id);
+      if( sysRc != MQRC_NONE ) goto _door;
     }
   }
 
@@ -283,7 +298,7 @@ MQLONG putInitStateMsg( unsigned short _id )
   pmo.Options = MQPMO_FAIL_IF_QUIESCING + 
                 MQPMO_NO_CONTEXT ;
 
-  if( _id > 3 ) 
+  if( _id > AMQ_MAX_BASE_ID ) 
   {
     logger( LAER_LOG_ID_HIGH, _id );
     sysRc = -1 ;
