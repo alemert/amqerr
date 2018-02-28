@@ -288,6 +288,7 @@ MQLONG getSendState( tAmqerr* _file )
   _door:
 
   logFuncExit( );
+  if( sysRc == MQRC_NO_MSG_AVAILABLE ) sysRc = MQRC_NONE ;
   return sysRc ;
 }
 

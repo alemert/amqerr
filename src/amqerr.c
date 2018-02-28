@@ -10,6 +10,7 @@
 /*    - amqerr                                                                */
 /*    - amqerrsend                                                            */
 /*    - dir2queue                                                             */
+/*    - file2queue            */
 /*                                                                            */
 /*  history                                                                   */
 /*  19.02.2018 am initial version                                    */
@@ -61,6 +62,7 @@
 /******************************************************************************/
 
 #define LOOP          5    // time to sleep in each main loop
+#define AMQERR_LINE_SIZE  128
 
 /******************************************************************************/
 /*   M A C R O S                                                              */
@@ -80,6 +82,7 @@
 MQLONG amqerrsend( );
 MQLONG getDataPath( char* _path );
 MQLONG dir2queue( char* _path );
+MQLONG file2queue( const char* _path, const char* file, off_t offset );
 
 /******************************************************************************/
 /*                                                                            */
@@ -186,8 +189,6 @@ MQLONG amqerrsend( )
   return sysRc;
 }
 
-
-
 /******************************************************************************/
 /*  directory to queue                                                        */
 /*                                                                            */
@@ -274,6 +275,14 @@ MQLONG dir2queue( char* _path )
     sysRc = getSendState( baseFile );
     if( sysRc != MQRC_NONE ) goto _door;
 
+    for( i=AMQ_MAX_BASE_ID; i>0; i-- )
+    {
+      if( baseFile[i].mtime == 0 ) 
+      {
+	file2queue( _path, baseFile[i].name, baseFile[i].length );
+      }
+    }
+
     sleep(LOOP);
   }
 
@@ -281,6 +290,65 @@ MQLONG dir2queue( char* _path )
 
   houseKeepingMQ() ;
 
+  logFuncExit( );
+  return sysRc;
+}
+
+/******************************************************************************/
+/*  file to queue                                                             */
+/*                                                                            */
+/*  description:                                                              */
+/*   - move to the position offset                                            */
+/*   - loop until EOF                                                         */
+/*     - read and analyze log                                                 */
+/*     - put log information to the store queue                               */
+/*   - end of loop                                                            */
+/*   - put new position and mtime to the state queue                          */
+/*                                                                            */
+/*  attributes:                                                               */
+/*     - path to the AMQERR files                                             */
+/*     - name of the AMQERR file                                              */
+/*     - file offset                                                          */
+/*                                                                            */
+/*  return code:                                                              */
+/*    (int)    0  -> OK                                                       */
+/*    (int) != 0 -> MQ Reason Code                                            */
+/*                                                                            */
+/******************************************************************************/
+MQLONG file2queue( const char* _path, const char* _file, off_t _offset )
+{
+  logFuncCall( );
+
+  MQLONG sysRc = MQRC_NONE;
+
+  FILE* fp;
+
+  char fileName[PATH_MAX];
+  char buff[AMQERR_LINE_SIZE] ;
+   
+  snprintf(fileName,PATH_MAX, "%s/%-*.*s", _path,
+	   (int)sizeof(AMQ_FILE_NAME)-1,(int)sizeof(AMQ_FILE_NAME)-1,_file);
+ 
+  if( !(fp = fopen(fileName,"r")) )
+  {
+    sysRc = errno ;
+    logger( LSTD_OPEN_FILE_FAILED, _file );
+    logger( LSTD_ERRNO_ERR, sysRc, strerror( sysRc ) );
+    goto _door ;
+  }
+
+  if( fseek(fp, _offset,SEEK_SET) != 0 )
+  {
+    sysRc = errno ;
+    logger( LSTD_ERRNO_ERR, sysRc, strerror( sysRc ) );
+  }
+
+  while( fgets(buff,AMQERR_LINE_SIZE,fp))
+  {
+    printf("%s",buff);
+  }
+
+  _door:
   logFuncExit( );
   return sysRc;
 }
