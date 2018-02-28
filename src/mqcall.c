@@ -122,6 +122,7 @@ MQLONG initMQ( const char* _qmgrName )
   sysRc=mqOpenObject( ghCon                 , // connection handle
                       &dStateQ              , // queue descriptor
                       MQOO_OUTPUT           | // put message
+                      MQOO_INPUT_SHARED     | // get message
                       MQOO_BROWSE           | // open for browse
                       MQOO_FAIL_IF_QUIESCING, // fail if queue manager stopping
                       &ghStateQ              ); // queue handle
@@ -199,49 +200,71 @@ MQLONG getSendState( tAmqerr* _file )
 
   MQLONG sysRc ;
 
-  MQMD  md = { MQMD_DEFAULT };
-  MQGMO gmo = { MQGMO_DEFAULT };
-  gmo.Version = MQGMO_VERSION_2 ;
+  MQMD  bmd = { MQMD_DEFAULT };     // browse message descriptor
+  MQMD  gmd = { MQMD_DEFAULT };     // get message descriptor (destructive)
+
+  MQGMO bmo = { MQGMO_DEFAULT };    // browse message options
+  MQGMO gmo = { MQGMO_DEFAULT };    // get message options (destructive)
+
+  bmo.Version       = MQGMO_VERSION_2 ;
+  bmo.Options      |= MQGMO_BROWSE_FIRST;
+  bmo.MatchOptions  = MQMO_NONE;
+
+  gmo.Version      = MQGMO_VERSION_2 ;
+  gmo.Options     |=
+  gmo.MatchOptions = MQMO_MATCH_MSG_ID ;
 
   tAmqerrState msg;
+  tAmqerrState dummy;  // dummy message; garbage
   MQLONG msgLng = sizeof(tAmqerrState);
 
   unsigned short id ;
   
-  gmo.Options      |= MQGMO_BROWSE_FIRST;
-  gmo.MatchOptions  = MQMO_NONE;
 
+  // -------------------------------------------------------
+  // browse all messages
+  // -------------------------------------------------------
   for( id=1; sysRc != MQRC_NO_MSG_AVAILABLE; id++ )
-  {
-//  gmo.MatchOptions = MQMO_NONE;
-    sysRc = mqGet( ghCon               ,   //
-                   ghStateQ            ,   //
-                   &msg                ,   //
-                   &msgLng             ,   //
-                   &md               ,   //
-                   gmo           ,   //
-                   MQGMO_NO_WAIT      );   //
-
-    if( (gmo.Options & MQGMO_BROWSE_FIRST) == MQGMO_BROWSE_FIRST) 
-    {
-      gmo.Options -= MQGMO_BROWSE_FIRST;
-      gmo.Options |= MQGMO_BROWSE_NEXT ;
-    }
-
-    if( id == AMQ_MAX_BASE_ID )   // error; zwei gmo notwendig browse & get
-    {                             // siehe cleanq
-      gmo.Options -= MQGMO_BROWSE_NEXT ;
-      gmo.Options |= MQGMO_MSG_UNDER_CURSOR ; 
-    }
-
-    switch( sysRc )
-    {
-      case MQRC_NONE: 
-      {
+  {                                       //
+    sysRc = mqGet( ghCon          ,       // browse message
+                   ghStateQ       ,       //
+                   &msg           ,       //
+                   &msgLng        ,       //
+                   &bmd           ,       //
+                   bmo            ,       //
+                   MQGMO_NO_WAIT );       //
+                                          //
+    if( (bmo.Options & MQGMO_BROWSE_FIRST) == MQGMO_BROWSE_FIRST) 
+    {                                     //
+      bmo.Options -= MQGMO_BROWSE_FIRST;  // change browse first to 
+      bmo.Options |= MQGMO_BROWSE_NEXT ;  // browse next after 
+    }                                     //  the first message
+                                          //
+    switch( sysRc )                       //
+    {                                     //
+      case MQRC_NONE:                     //
+      {                                   //
+        if( memcmp( _file[msg.fileId].msgId, MQMI_NONE, sizeof(MQBYTE24) ) != 0)
+	{                                 //
+	  memcpy( gmd.MsgId, _file[msg.fileId].msgId, sizeof(MQBYTE24) );
+	  sysRc = mqGet( ghCon         ,  //
+                         ghStateQ      ,  //
+                         &dummy        ,  //
+                         &msgLng       ,  //
+                         &gmd          ,  //
+                         gmo           ,  //
+                         MQGMO_NO_WAIT ); //
+          switch( sysRc )
+	  {
+            case MQRC_NONE:             break;
+	    case MQRC_NO_MSG_AVAILABLE: break;
+	    default: goto _door;
+	  }
+	}
 	_file[msg.fileId].length = msg.length;
 	_file[msg.fileId].mtime  = msg.time  ;
         memcpy(_file[msg.fileId].name,msg.file,sizeof(msg.file));
-	memcpy(_file[msg.fileId].msgId, md.MsgId, sizeof(MQBYTE24) );
+	memcpy(_file[msg.fileId].msgId, bmd.MsgId, sizeof(MQBYTE24) );
         break;
       }
       case MQRC_NO_MSG_AVAILABLE:
