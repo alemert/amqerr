@@ -87,6 +87,8 @@ struct sAmqerrState
 /******************************************************************************/
 /*   M A C R O S                                                              */
 /******************************************************************************/
+#define getDataPath( path ) disQmgr( MQCA_SSL_KEY_REPOSITORY, path )
+#define getCommandLevel( path ) disQmgr( MQCA_SSL_KEY_REPOSITORY, path )
 
 /******************************************************************************/
 /*   P R O T O T Y P E S                                                      */
@@ -110,7 +112,7 @@ int copy( const char* _src, const char* _dst );
 // ---------------------------------------------------------
 MQLONG initMQ( const char* _qmgrName );
 MQLONG houseKeepingMQ();
-MQLONG getDataPath( char* _path );
+MQLONG disQmgr( MQLONG _selector, char* _strAttr );
 MQLONG getSendState( tAmqerr* baseFile );
 MQLONG putInitStateMsg( unsigned short _id );
 

@@ -80,7 +80,6 @@
 /*   P R O T O T Y P E S                                                      */
 /******************************************************************************/
 MQLONG amqerrsend( );
-MQLONG getDataPath( char* _path );
 MQLONG dir2queue( char* _path );
 MQLONG file2queue( const char* _path, const char* file, off_t offset );
 

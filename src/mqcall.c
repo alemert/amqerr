@@ -7,13 +7,16 @@
 /*  file: rotate.c                                                            */
 /*                                                                            */
 /*  functions:                                                                */
-/*    - initMQ                                */
-/*    - houseKeepingMQ                    */
-/*    - getSendState                  */
-/*    - putInitStateMsg                        */
+/*    - initMQ                                            */
+/*    - houseKeepingMQ                        */
+/*    - getSendState                        */
+/*    - putInitStateMsg                            */
+/*    - disQmgr                        */
+/*                    */
+/*  macros: (amqerr.h)            */
 /*    - getDataPath                                                           */
 /*                                                                            */
-/*  history:                              */
+/*  history:                                    */
 /*  24.02.2018 am initial version                  */
 /*                                                                            */
 /******************************************************************************/
@@ -353,7 +356,7 @@ MQLONG putInitStateMsg( unsigned short _id )
 }
 
 /******************************************************************************/
-/*  GET DATA PATH                                                             */
+/*  DISPLAY QUEUE MANAGER                                                     */
 /*                                                                            */
 /*  description:                                                              */
 /*    display qmstatus all                                                    */
@@ -364,7 +367,7 @@ MQLONG putInitStateMsg( unsigned short _id )
 /*    (char*) NULL -> ERR                                                     */
 /*                                                                            */
 /******************************************************************************/
-MQLONG getDataPath( char* _path )
+MQLONG disQmgr( MQLONG _selector, char* _strAttr )
 {
   logFuncCall( );
 
@@ -393,7 +396,7 @@ MQLONG getDataPath( char* _path )
   int j;
 
 
-#define _LOGTERM_ 
+#define _LOGTERM_  
 
   // -------------------------------------------------------
   // open bags for MQ Execute
@@ -415,11 +418,12 @@ MQLONG getDataPath( char* _path )
   // -------------------------------------------------------
   // DISPLAY QMGR ALL 
   //   process command in two steps
-  //   1. setup the list of arguments MQIACF_ALL = MQCA_SSL_KEY_REPOSITORY
+  //   1. setup the list of arguments MQIACF_ALL = selector
+  //        selectors with macro: 
+  //          - MQCA_SSL_KEY_REPOSITORY
   //   2. send a command MQCMD_INQUIRE_Q_MGR = DISPLAY QMGR
   // -------------------------------------------------------
-  mqrc = mqSetInqAttr( cmdBag,            // set attribute 
-                       MQCA_SSL_KEY_REPOSITORY) ;
+  mqrc = mqSetInqAttr( cmdBag, _selector);// set attribute 
                                           // for the PCF command
   switch( mqrc )                          // DISPLAY QMGR SSLKEYR
   {                                       //
@@ -678,11 +682,16 @@ MQLONG getDataPath( char* _path )
               // TYPE: string
               // analyze selector
               // ---------------------------------------------
+	      if( childSelector == _selector )
+              {
+               strncpy( _strAttr, dirname( dirname( sBuffer )), PATH_MAX );
+              }
+#if(0)
               switch( childSelector )       // 
               {                             //
                 case MQCA_SSL_KEY_REPOSITORY://
                 {                           //
-                 strncpy( _path, dirname( dirname( sBuffer )), PATH_MAX );
+                 strncpy( _strAttr, dirname( dirname( sBuffer )), PATH_MAX );
                   break;                    //
                 }                           //
                 default:                    //
@@ -690,6 +699,7 @@ MQLONG getDataPath( char* _path )
                   break;                    //
                 }                           // - internal loop over child items
               }                             // - analyze selector of type string
+#endif
 #ifdef        _LOGTERM_                     // 
               printf( " value %s\n", sBuffer );
 #endif                                      //      
