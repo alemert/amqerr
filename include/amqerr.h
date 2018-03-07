@@ -1,7 +1,7 @@
 /******************************************************************************/
-/*                        */
+/*                                    */
 /*   A M Q E R R   T O   Q U E U E                                            */
-/*                              */
+/*                                    */
 /******************************************************************************/
 
 /******************************************************************************/
@@ -12,6 +12,7 @@
 // system
 // ---------------------------------------------------------
 #include <time.h>
+#include <limits.h>
 
 // ---------------------------------------------------------
 // MQ
@@ -31,6 +32,7 @@ const char progname[] = "amqerr" ;
 extern const char progname[] ;
 #endif
 
+#define AMQERR_LINE_SIZE  128
 #define ITEM_LENGTH   PATH_MAX 
 #define AMQERR        "AMQERR"
 #define AMQ_FILE_NAME AMQERR"??.LOG"
@@ -58,6 +60,7 @@ extern const char progname[] ;
 /******************************************************************************/
 typedef struct sAmqerr tAmqerr ;
 typedef struct sAmqerrState tAmqerrState;
+typedef struct sAmgerrMessage tAmqerrMessage;
 
 /******************************************************************************/
 /*   S T R U C T S                                                            */
@@ -80,6 +83,16 @@ struct sAmqerrState
   MQLONG   length;
 };
 
+struct sAmgerrMessage
+{
+  MQLONG version;
+  time_t time   ;
+  char user[12] ;
+  char program[12];
+  char host[16];
+  char installation[MQ_INSTALLATION_NAME_LENGTH];
+};
+
 /******************************************************************************/
 /*   G L O B A L E S                                                          */
 /******************************************************************************/
@@ -87,8 +100,17 @@ struct sAmqerrState
 /******************************************************************************/
 /*   M A C R O S                                                              */
 /******************************************************************************/
-#define getDataPath( path ) disQmgr( MQCA_SSL_KEY_REPOSITORY, path )
-#define getCommandLevel( path ) disQmgr( MQCA_SSL_KEY_REPOSITORY, path )
+#define getDataPath( rc, path )  \
+{                           \
+  MQLONG _mDummy;             \
+  rc = disQmgr( MQCA_SSL_KEY_REPOSITORY, path , &_mDummy );  \
+}  
+
+#define getCmdLevel( rc, cml )  \
+{                           \
+  char* _mDummy = NULL;              \
+  rc= disQmgr( MQIA_COMMAND_LEVEL, _mDummy, cml );   \
+}
 
 /******************************************************************************/
 /*   P R O T O T Y P E S                                                      */
@@ -112,8 +134,13 @@ int copy( const char* _src, const char* _dst );
 // ---------------------------------------------------------
 MQLONG initMQ( const char* _qmgrName );
 MQLONG houseKeepingMQ();
-MQLONG disQmgr( MQLONG _selector, char* _strAttr );
+MQLONG disQmgr( MQLONG _selector, char* _strAttr, PMQLONG _intAttr );
 MQLONG getSendState( tAmqerr* baseFile );
 MQLONG putInitStateMsg( unsigned short _id );
 
+
+// ---------------------------------------------------------
+// parse.c
+// ---------------------------------------------------------
+int parseFile800( FILE* fp );
 

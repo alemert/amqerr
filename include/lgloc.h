@@ -20,3 +20,8 @@
 #define LEV_LAER_LOG_ID_HIGH              ERR
 #define TXT_LAER_LOG_ID_HIGH              "log id %d to high for AMQERR files"
 
+#define     LAER_MQ_CMD_VER_ERR           1020
+#define LEV_LAER_MQ_CMD_VER_ERR           ERR
+#define TXT_LAER_MQ_CMD_VER_ERR           "MQ Command level %d not supported"
+
+

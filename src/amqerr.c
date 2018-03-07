@@ -64,7 +64,6 @@
 /******************************************************************************/
 
 #define LOOP          5    // time to sleep in each main loop
-#define AMQERR_LINE_SIZE  128
 
 /******************************************************************************/
 /*   M A C R O S                                                              */
@@ -345,7 +344,6 @@ MQLONG file2queue( int _cmdLevel    ,
   FILE* fp;
 
   char fileName[PATH_MAX];
-  char buff[AMQERR_LINE_SIZE] ;
    
   snprintf(fileName,PATH_MAX, "%s/%-*.*s", _path,
 	   (int)sizeof(AMQ_FILE_NAME)-1,(int)sizeof(AMQ_FILE_NAME)-1,_file);
@@ -399,6 +397,7 @@ MQLONG file2queue( int _cmdLevel    ,
     case MQCMDL_LEVEL_800 :      
     {
       sysRc = parseFile800( fp );
+      break;
     }
     case MQCMDL_LEVEL_801 :     
     case MQCMDL_LEVEL_802 :    
@@ -408,11 +407,6 @@ MQLONG file2queue( int _cmdLevel    ,
       sysRc = 1;
       goto _door;
     }
-  }
-
-  while( fgets(buff,AMQERR_LINE_SIZE,fp))
-  {
-    printf("%s",buff);
   }
 
   _door:
