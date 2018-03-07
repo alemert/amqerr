@@ -53,6 +53,8 @@
 // ---------------------------------------------------------
 #include <amqerr.h>
 
+#include "lgloc.h"
+
 /******************************************************************************/
 /*   G L O B A L S                                                            */
 /******************************************************************************/
@@ -80,8 +82,8 @@
 /*   P R O T O T Y P E S                                                      */
 /******************************************************************************/
 MQLONG amqerrsend( );
-MQLONG dir2queue( char* _path );
-MQLONG file2queue( const char* _path, const char* file, off_t offset );
+MQLONG dir2queue( char* _path, int _cmdVer );
+MQLONG file2queue(int _cmdVer,const char* _path,const char* file,off_t offset);
 
 /******************************************************************************/
 /*                                                                            */
@@ -164,21 +166,29 @@ MQLONG amqerrsend( )
   MQLONG sysRc = MQRC_NONE ;
 
   char path[PATH_MAX+1];
+  int  cmVer;
+
 
   // -------------------------------------------------------
   // get data path of the queue manager
   // -------------------------------------------------------
-  sysRc = getDataPath( path );
+  getDataPath( sysRc, path );
   if( sysRc != MQRC_NONE )
   {
     goto _door;
   }
   strcat( path, "/errors" );
 
+  getCmdLevel( sysRc, &cmVer );
+  if( sysRc != MQRC_NONE )
+  {
+    goto _door;
+  }
+
   // -------------------------------------------------------
   // rotate files, transfer data from AMQERR files to store queue
   // -------------------------------------------------------
-  dir2queue( path );
+  dir2queue( path, cmVer );
 
   _door:
 
@@ -202,13 +212,14 @@ MQLONG amqerrsend( )
 /*  attributes:                                                               */
 /*     - MQ connection handle                                                 */
 /*     - path to error files                                                  */
+/*     - command level of the queue manager                                   */
 /*                                                                            */
 /*  return code:                                                              */
 /*    (int)    0  -> OK                                                       */
 /*    (int) != 0 -> MQ Reason Code                                            */
 /*                                                                            */
 /******************************************************************************/
-MQLONG dir2queue( char* _path )
+MQLONG dir2queue( char* _path, int _cmdVer )
 {
   logFuncCall( );
 
@@ -278,7 +289,14 @@ MQLONG dir2queue( char* _path )
     {
       if( baseFile[i].mtime == 0 ) 
       {
-	file2queue( _path, baseFile[i].name, baseFile[i].length );
+	sysRc = file2queue( _cmdVer, 
+                            _path, 
+                            baseFile[i].name, 
+                            baseFile[i].length );
+        if( sysRc > 0 )
+	{
+	  goto _door;
+	}
       }
     }
 
@@ -305,6 +323,7 @@ MQLONG dir2queue( char* _path )
 /*   - put new position and mtime to the state queue                          */
 /*                                                                            */
 /*  attributes:                                                               */
+/*     - command level of the queue manager                                   */
 /*     - path to the AMQERR files                                             */
 /*     - name of the AMQERR file                                              */
 /*     - file offset                                                          */
@@ -314,7 +333,10 @@ MQLONG dir2queue( char* _path )
 /*    (int) != 0 -> MQ Reason Code                                            */
 /*                                                                            */
 /******************************************************************************/
-MQLONG file2queue( const char* _path, const char* _file, off_t _offset )
+MQLONG file2queue( int _cmdLevel    , 
+                   const char* _path, 
+                   const char* _file, 
+                   off_t _offset    )
 {
   logFuncCall( );
 
@@ -342,12 +364,63 @@ MQLONG file2queue( const char* _path, const char* _file, off_t _offset )
     logger( LSTD_ERRNO_ERR, sysRc, strerror( sysRc ) );
   }
 
+  switch( _cmdLevel )
+  {
+    case MQCMDL_LEVEL_1   :
+    case MQCMDL_LEVEL_101 :
+    case MQCMDL_LEVEL_110 :
+    case MQCMDL_LEVEL_114 :
+    case MQCMDL_LEVEL_120 :             
+    case MQCMDL_LEVEL_200 :            
+    case MQCMDL_LEVEL_201 :           
+    case MQCMDL_LEVEL_210 :          
+    case MQCMDL_LEVEL_211 :         
+    case MQCMDL_LEVEL_220 :        
+    case MQCMDL_LEVEL_221 :       
+    case MQCMDL_LEVEL_230 :      
+    case MQCMDL_LEVEL_320 :     
+    case MQCMDL_LEVEL_420 :    
+    case MQCMDL_LEVEL_500 :   
+    case MQCMDL_LEVEL_510 :  
+    case MQCMDL_LEVEL_520 : 
+    case MQCMDL_LEVEL_530 :
+    case MQCMDL_LEVEL_531 :             
+    case MQCMDL_LEVEL_600 :            
+    case MQCMDL_LEVEL_700 :           
+    case MQCMDL_LEVEL_701 :          
+    case MQCMDL_LEVEL_710 :         
+    case MQCMDL_LEVEL_711 :        
+    case MQCMDL_LEVEL_750 :       
+    {
+      logger( LAER_MQ_CMD_VER_ERR, _cmdLevel );
+      sysRc = 1;
+      goto _door;
+    }
+    case MQCMDL_LEVEL_800 :      
+    {
+      sysRc = parseFile800( fp );
+    }
+    case MQCMDL_LEVEL_801 :     
+    case MQCMDL_LEVEL_802 :    
+    default:
+    {
+      logger( LAER_MQ_CMD_VER_ERR, _cmdLevel );
+      sysRc = 1;
+      goto _door;
+    }
+  }
+
   while( fgets(buff,AMQERR_LINE_SIZE,fp))
   {
     printf("%s",buff);
   }
 
   _door:
+
+  if( fp != NULL)
+  {
+    fclose(fp);
+  }
   logFuncExit( );
   return sysRc;
 }

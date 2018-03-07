@@ -7,14 +7,15 @@
 /*  file: rotate.c                                                            */
 /*                                                                            */
 /*  functions:                                                                */
-/*    - initMQ                                            */
-/*    - houseKeepingMQ                        */
-/*    - getSendState                        */
-/*    - putInitStateMsg                            */
-/*    - disQmgr                        */
-/*                    */
+/*    - initMQ                                                  */
+/*    - houseKeepingMQ                            */
+/*    - getSendState                            */
+/*    - putInitStateMsg                              */
+/*    - disQmgr                            */
+/*                              */
 /*  macros: (amqerr.h)            */
 /*    - getDataPath                                                           */
+/*    - getCmdLev            */
 /*                                                                            */
 /*  history:                                    */
 /*  24.02.2018 am initial version                  */
@@ -367,7 +368,7 @@ MQLONG putInitStateMsg( unsigned short _id )
 /*    (char*) NULL -> ERR                                                     */
 /*                                                                            */
 /******************************************************************************/
-MQLONG disQmgr( MQLONG _selector, char* _strAttr )
+MQLONG disQmgr( MQLONG _selector, char* _strAttr, PMQLONG _intAttr )
 {
   logFuncCall( );
 
@@ -635,6 +636,15 @@ MQLONG disQmgr( MQLONG _selector, char* _strAttr )
                 default: goto _door;       //
               }                            //
                                            //
+              // ---------------------------------------------
+              // CHILD ITEM
+              // TYPE: 32 bit integer
+              // analyze selector
+              // ---------------------------------------------
+	      if( childSelector == _selector )
+              {
+	        *_intAttr = selInt32Val;
+              }
 #ifdef        _LOGTERM_                    //
               pBuffer = (char*) itemValue2str( childSelector,
                                                (MQLONG) selInt32Val );
@@ -684,7 +694,7 @@ MQLONG disQmgr( MQLONG _selector, char* _strAttr )
               // ---------------------------------------------
 	      if( childSelector == _selector )
               {
-               strncpy( _strAttr, dirname( dirname( sBuffer )), PATH_MAX );
+                strncpy( _strAttr, dirname( dirname( sBuffer )), PATH_MAX );
               }
 #if(0)
               switch( childSelector )       // 
