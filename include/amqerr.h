@@ -87,10 +87,16 @@ struct sAmgerrMessage
 {
   MQLONG version;
   time_t time   ;
+  char amqmsg[7];
+  char level ;
+  char amqtxt[80];
+  char pid[12];
   char user[12] ;
   char program[12];
-  char host[16];
+  char host[12];
   char installation[MQ_INSTALLATION_NAME_LENGTH];
+  char vrmf[12];
+  char qmgr[MQ_Q_MGR_NAME_LENGTH];
 };
 
 /******************************************************************************/

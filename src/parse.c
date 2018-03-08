@@ -22,6 +22,7 @@
 // ---------------------------------------------------------
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
 
 // ---------------------------------------------------------
 // own 
@@ -78,28 +79,114 @@ int parseFile800( FILE* _fp )
   int sysRc ;
 
   tAmqerrMessage msg;
+  msg.version = 800 ;
 
-  struct tm ti;
+  struct tm ti = {0};
 
   // -------------------------------------------------------  
-  // Time Stamp, PID, User, Program
+  // 1st line
+  //   Time Stamp, PID, User, Program
   // -------------------------------------------------------  
   if( !fgets(buff,AMQERR_LINE_SIZE, _fp) ) goto _door;
   
   {
     char *time = strtok( buff,"-" );
-                         printf("time >%s<\n",time) ;
-    char *pid = strtok(NULL,"(");
-                         printf("pid  >%s<\n",pid) ;
-         *pid = strtok(NULL,")");
-                         printf("pid  >%s<\n",pid) ;
-    char *usr = strtok(NULL," ");
-    char *prg = strtok(NULL,"\n");
-#if(1)
+    char *ptr = strtok(NULL,"(");
+    char *pid = strtok(NULL,")");
+          ptr = strtok(NULL,"(");
+    char *usr = strtok(NULL,")");
+          ptr = strtok(NULL,"(");
+    char *prg = strtok(NULL,")");
+          ptr = strtok(NULL,"\n");
 
-    printf("user >%s<\n",usr) ;
-    printf("prg  >%s<\n",prg) ;
+    ti.tm_mon  = atol( strtok( time,"/" ) );
+    ti.tm_mday = atol( strtok( NULL,"/" ) );
+    ti.tm_year = atol( strtok( NULL," " ) ) - 1900 ;
+    int h = atol( strtok( NULL,":" ) );
+    ti.tm_min = atol( strtok( NULL,":" ) );
+    ti.tm_sec = atol( strtok( NULL," " ) );
+    char *apm = strtok( NULL," " ) ;
+    if( apm[0] == 'A' )
+    {
+      if( h == 12 ) h=0;
+    }
+    else
+    {
+      h +=12 ;
+    }
+    ti.tm_hour = h;
+   
+    msg.time = mktime(&ti);
+    memcpy(msg.pid    , pid, sizeof(msg.pid)    );
+    memcpy(msg.user   , usr, sizeof(msg.user)   );
+    memcpy(msg.program, prg, sizeof(msg.program));
+
+#if(0)
+    printf("year  >%d<\n", ti.tm_year);
+    printf("month >%d<\n", ti.tm_mon);
+    printf("day   >%d<\n", ti.tm_mday);
+    printf("hour  >%d<\n", ti.tm_hour);
+    printf("min   >%d<\n", ti.tm_min);
+    printf("sec   >%d<\n", ti.tm_sec);
+    printf("pid   >%s<\n", pid) ;
+    printf("user  >%s<\n", usr) ;
+    printf("prg   >%s<\n", prg) ;
 #endif
+  }
+
+  // -------------------------------------------------------  
+  // 2nd line
+  // host, installation
+  // -------------------------------------------------------  
+  if( !fgets(buff,AMQERR_LINE_SIZE, _fp) ) goto _door;
+
+  {
+    char *ptr  = strtok(buff,"(");
+    char *host = strtok(NULL,")");
+          ptr  = strtok(NULL,"(");
+    char *inst = strtok(NULL,")");
+#if(0)
+    printf("host   >%s<\n", host) ;
+    printf("inst   >%s<\n", inst) ;
+#endif
+    memcpy(msg.host,host,sizeof(msg.host));
+    memcpy(msg.installation,inst,sizeof(msg.installation));
+  }
+
+  // -------------------------------------------------------  
+  // 3th line 
+  // Version, queue manager
+  // -------------------------------------------------------  
+  if( !fgets(buff,AMQERR_LINE_SIZE, _fp) ) goto _door;
+
+  {
+    char *ptr  = strtok(buff,"(");
+    char *vrmf = strtok(NULL,")");
+          ptr  = strtok(NULL,"(");
+    char *qmgr = strtok(NULL,")");
+    memcpy(msg.vrmf,vrmf,sizeof(msg.vrmf));
+    memcpy(msg.qmgr,qmgr,sizeof(msg.qmgr));
+    
+  }
+
+  // -------------------------------------------------------  
+  // 4th line 
+  // empty
+  // -------------------------------------------------------  
+  if( !fgets(buff,AMQERR_LINE_SIZE, _fp) ) goto _door;
+
+  // -------------------------------------------------------  
+  // 5th line 
+  // AMQ Message
+  // -------------------------------------------------------  
+  if( !fgets(buff,AMQERR_LINE_SIZE, _fp) ) goto _door;
+
+  {
+    char *amq = strtok(buff,":");
+    char *txt = strtok(NULL,"\n");
+    memcpy(msg.amqmsg,amq,sizeof(amq));
+    msg.level = ' ';
+    memcpy(msg.amqtxt,txt,sizeof(txt));
   }
 
   while( fgets(buff,AMQERR_LINE_SIZE, _fp))
