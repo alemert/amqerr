@@ -340,8 +340,10 @@ MQLONG file2queue( int _cmdLevel    ,
   logFuncCall( );
 
   MQLONG sysRc = MQRC_NONE;
+  off_t newOffset ;
 
   FILE* fp;
+  tAmqerrMessage msg;
 
   char fileName[PATH_MAX];
    
@@ -388,15 +390,16 @@ MQLONG file2queue( int _cmdLevel    ,
     case MQCMDL_LEVEL_701 :          
     case MQCMDL_LEVEL_710 :         
     case MQCMDL_LEVEL_711 :        
-    case MQCMDL_LEVEL_750 :       
     {
       logger( LAER_MQ_CMD_VER_ERR, _cmdLevel );
       sysRc = 1;
       goto _door;
     }
+    case MQCMDL_LEVEL_750 :       
     case MQCMDL_LEVEL_800 :      
     {
-      sysRc = parseFile800( fp );
+      sysRc = parseFile800( fp, &msg );
+      newOffset = (sysRc > 0) ? sysRc : 0;
       break;
     }
     case MQCMDL_LEVEL_801 :     
@@ -407,6 +410,12 @@ MQLONG file2queue( int _cmdLevel    ,
       sysRc = 1;
       goto _door;
     }
+  }
+
+  if( sysRc > 0 )
+  {
+    putAmqMessage( &msg );
+    putStateMessage( _file, newOffset );
   }
 
   _door:

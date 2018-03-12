@@ -87,6 +87,8 @@ struct sAmgerrMessage
 {
   MQLONG version;
   time_t time   ;
+  unsigned short explLeng;
+  unsigned short actLeng;
   char amqmsg[7];
   char level ;
   char amqtxt[80];
@@ -97,6 +99,8 @@ struct sAmgerrMessage
   char installation[MQ_INSTALLATION_NAME_LENGTH];
   char vrmf[12];
   char qmgr[MQ_Q_MGR_NAME_LENGTH];
+  char *explanation;
+  char *action;
 };
 
 /******************************************************************************/
@@ -143,10 +147,11 @@ MQLONG houseKeepingMQ();
 MQLONG disQmgr( MQLONG _selector, char* _strAttr, PMQLONG _intAttr );
 MQLONG getSendState( tAmqerr* baseFile );
 MQLONG putInitStateMsg( unsigned short _id );
+MQLONG putAmqMessage( tAmqerrMessage* _msg );
 
 
 // ---------------------------------------------------------
 // parse.c
 // ---------------------------------------------------------
-int parseFile800( FILE* fp );
+int parseFile800( FILE* _fp, tAmqerrMessage* _msg );
 

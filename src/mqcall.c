@@ -7,17 +7,18 @@
 /*  file: mqcall.c                                                            */
 /*                                                                            */
 /*  functions:                                                                */
-/*    - initMQ                                                  */
-/*    - houseKeepingMQ                            */
-/*    - getSendState                            */
-/*    - putInitStateMsg                              */
-/*    - disQmgr                            */
-/*                              */
-/*  macros: (amqerr.h)            */
+/*    - initMQ                                                              */
+/*    - houseKeepingMQ                                    */
+/*    - getSendState                                    */
+/*    - putInitStateMsg                                      */
+/*    - disQmgr                                    */
+/*    - putAmqMessage                              */
+/*                                  */
+/*  macros: (amqerr.h)                */
 /*    - getDataPath                                                           */
-/*    - getCmdLev            */
+/*    - getCmdLev                */
 /*                                                                            */
-/*  history:                                    */
+/*  history:                                          */
 /*  24.02.2018 am initial version                  */
 /*                                                                            */
 /******************************************************************************/
@@ -215,7 +216,7 @@ MQLONG getSendState( tAmqerr* _file )
   bmo.MatchOptions  = MQMO_NONE;
 
   gmo.Version      = MQGMO_VERSION_2 ;
-  gmo.Options     |=
+//gmo.Options     |=
   gmo.MatchOptions = MQMO_MATCH_MSG_ID ;
 
   tAmqerrState msg;
@@ -308,7 +309,7 @@ MQLONG getSendState( tAmqerr* _file )
 /*                                                                            */
 /*  return code:                                                              */
 /*    MQRC_NONE -> OK                                                         */
-/*    -1        -> ERR file id to high (>3)            */
+/*    -1        -> ERR file id to high (>3)                                   */
 /*    other     -> ERR                                                        */
 /*                                                                            */
 /******************************************************************************/
@@ -747,6 +748,140 @@ _door:
 #ifdef _LOGTERM_
   printf( "\n" );
 #endif 
+
+  logFuncExit( );
+  return mqrc;
+}
+
+/******************************************************************************/
+/*  PUT AMQ MESSAGE                                                           */
+/*                                                                            */
+/*  description:                                                              */
+/*    put an AMQERR message on the store queue                                */
+/*                                                                            */
+/*  attributes:                                                               */
+/*    AMQERR message                                                          */
+/*                                                                            */
+/*  return code:                                                              */
+/*    MQRC_NONE -> OK                                                         */
+/*    other     -> ERR                                                        */
+/*                                                                            */
+/******************************************************************************/
+MQLONG putAmqMessage( tAmqerrMessage* _msg )
+{
+  logFuncCall( );
+
+  MQMD  md  = {MQMD_DEFAULT};
+  MQPMO pmo = {MQPMO_DEFAULT};
+
+  pmo.Options = MQPMO_FAIL_IF_QUIESCING ;
+
+  MQLONG mqrc = MQRC_NONE;
+
+  mqrc = mqPut( ghCon,
+		ghStoreQ,
+		&md,
+		&pmo,
+		(PMQVOID)_msg,
+		sizeof(*_msg) );
+
+  switch( mqrc )
+  {
+    case MQRC_NONE: break;
+    default: goto _door;
+  }
+
+  _door:
+
+  logFuncExit( );
+  return mqrc;
+}
+
+/******************************************************************************/
+/*  PUT STATE MESSAGE                                                         */
+/*                                                                            */
+/*  description:                                                              */
+/*    put a state message on the sate queue                                   */
+/*                                                                            */
+/*  attributes:                                                               */
+/*    file name analyzed                                                      */
+/*                                                                            */
+/*  return code:                                                              */
+/*    MQRC_NONE -> OK                                                         */
+/*    other     -> ERR                                                        */
+/*                                                                            */
+/******************************************************************************/
+MQLONG putStateMessage( const char* _file, off_t newOffset )
+{
+  logFuncCall( );
+
+  MQLONG mqrc = MQRC_NONE;
+
+  MQMD  bmd = { MQMD_DEFAULT };     // browse message descriptor
+  MQMD  gmd = { MQMD_DEFAULT };     // get message descriptor (destructive)
+
+  MQGMO bmo = { MQGMO_DEFAULT };    // browse message options
+  MQGMO gmo = { MQGMO_DEFAULT };    // get message options (destructive)
+
+  bmo.Version       = MQGMO_VERSION_2 ;
+  bmo.Options      |= MQGMO_BROWSE_FIRST;
+  bmo.MatchOptions  = MQMO_NONE;
+
+  gmo.Version      = MQGMO_VERSION_2 ;
+  gmo.Options  = MQGMO_MSG_UNDER_CURSOR ;
+
+  MQLONG msgLng ;
+
+  tAmqerrState msg;
+
+  unsigned short id;
+
+  // -------------------------------------------------------
+  // browse all messages
+  // -------------------------------------------------------
+  for( id=1; mqrc != MQRC_NO_MSG_AVAILABLE; id++ )
+  {                                       //
+    mqrc = mqGet( ghCon          ,       // browse message
+                  ghStateQ       ,       //
+                  &msg           ,       //
+                  &msgLng        ,       //
+                  &bmd           ,       //
+                  bmo            ,       //
+                  MQGMO_NO_WAIT );       //
+                                          //
+    if( (bmo.Options & MQGMO_BROWSE_FIRST) == MQGMO_BROWSE_FIRST) 
+    {                                     //
+      bmo.Options -= MQGMO_BROWSE_FIRST;  // change browse first to 
+      bmo.Options |= MQGMO_BROWSE_NEXT ;  // browse next after 
+    }                                     //  the first message
+                                          //
+    switch( mqrc )                       //
+    {                                     //
+      case MQRC_NONE:                     //
+      {                                   //
+        break;
+      }
+      case MQRC_NO_MSG_AVAILABLE:
+      {
+        break;
+      }
+      default: goto _door;
+    }
+
+    if( memcmp(msg.file,_file, sizeof(AMQ_FILE_NAME)) == 0 )
+    {
+      mqrc = mqGet( ghCon          ,       // browse message
+                    ghStateQ       ,       //
+                    &msg           ,       //
+                    &msgLng        ,       //
+                    &gmd           ,       //
+                    gmo            ,       //
+                    MQGMO_NO_WAIT );       //
+                                            //
+    }
+  }
+
+  _door:
 
   logFuncExit( );
   return mqrc;
